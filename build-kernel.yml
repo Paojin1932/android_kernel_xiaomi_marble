@@ -1,0 +1,59 @@
+name: Build marble kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: "Commit SHA / branch kernel source"
+        required: false
+        default: "4af9929c3ed4b0433d6c22f26e8171316351fc60"
+
+env:
+  KERNEL_REPO: Pzqqt/android_kernel_xiaomi_marble
+  TOOLCHAIN_REPO: crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r416183b
+  TOOLCHAIN_BRANCH: "11.0"
+  DEFCONFIG: marble_defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            build-essential python3 python-is-python3
+
+      - name: Fetch kernel source
+        run: |
+          curl -L "https://codeload.github.com/${{ env.KERNEL_REPO }}/tar.gz/${{ inputs.kernel_ref }}" -o kernel.tar.gz
+          mkdir kernel
+          tar -xzf kernel.tar.gz -C kernel --strip-components=1
+
+      - name: Fetch clang toolchain (r416183b)
+        run: git clone --depth=1 --branch "${{ env.TOOLCHAIN_BRANCH }}" "https://github.com/${{ env.TOOLCHAIN_REPO }}" clang
+
+      - name: Build kernel
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export KBUILD_BUILD_USER=fufuf4f4a
+          export KBUILD_BUILD_HOST=github-actions
+
+          make O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- ${{ env.DEFCONFIG }}
+
+          make -j"$(nproc)" O=out ARCH=arm64 \
+            CC=clang LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            2>&1 | tee out/build.log
+
+      - name: Upload hasil build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marble-kernel-${{ github.run_number }}
+          path: |
+            kernel/out/arch/arm64/boot/Image*
+            kernel/out/build.log
+          if-no-files-found: warn
